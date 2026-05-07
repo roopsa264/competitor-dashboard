@@ -1,140 +1,78 @@
-# dashboard.py - Complete Streamlit dashboard for competitor analysis
+# Enhanced dashboard.py - Add this section for batch uploads
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
 
-# Page configuration
-st.set_page_config(
-    page_title="Bajaj Broking - Competitor Intelligence Dashboard",
-    page_icon="📊",
-    layout="wide"
-)
+# ... (previous dashboard code remains) ...
 
-# Title
-st.title("📊 Bajaj Broking - Competitor Intelligence Dashboard")
-st.markdown("*AI-powered analysis of investor presentations from broking competitors*")
-
-# Sidebar for upload
+# Add batch upload section
 with st.sidebar:
-    st.header("📁 Add New Analysis")
-    uploaded_file = st.file_uploader("Upload competitor analysis CSV", type=["csv"])
+    st.header("📦 Batch Upload")
+    batch_file = st.file_uploader("Upload multiple analyses (CSV)", 
+                                   type=["csv"],
+                                   accept_multiple_files=True)
     
-    if uploaded_file is not None:
-        new_data = pd.read_csv(uploaded_file)
-        # Save to session state
+    if batch_file:
+        all_batch_dfs = []
+        for file in batch_file:
+            df_batch = pd.read_csv(file)
+            all_batch_dfs.append(df_batch)
+        
+        combined_batch = pd.concat(all_batch_dfs, ignore_index=True)
+        
+        # Merge with existing data
         if 'all_analyses' in st.session_state:
-            st.session_state.all_analyses = pd.concat([st.session_state.all_analyses, new_data], ignore_index=True)
+            st.session_state.all_analyses = pd.concat(
+                [st.session_state.all_analyses, combined_batch], 
+                ignore_index=True
+            ).drop_duplicates()
         else:
-            st.session_state.all_analyses = new_data
-        st.success(f"✅ Added {len(new_data)} analyses")
-    
-    st.divider()
-    st.caption("Built for Bajaj Broking Innovation Team")
+            st.session_state.all_analyses = combined_batch
+        
+        st.success(f"✅ Added {len(combined_batch)} analyses from {len(batch_file)} files")
 
-# Load data
-if 'all_analyses' not in st.session_state:
-    # Try to load existing data
-    try:
-        st.session_state.all_analyses = pd.read_csv('competitor_analyses.csv')
-    except:
-        st.session_state.all_analyses = pd.DataFrame()
+# Add competitor comparison view
+st.subheader("📊 Competitor Comparison Dashboard")
 
-df = st.session_state.all_analyses
-
-# Main dashboard
 if len(df) > 0:
-    # Convert timestamp to datetime
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    # Metrics comparison across competitors
+    col1, col2 = st.columns(2)
     
-    # ===== ROW 1: KPIs =====
-    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("📊 Companies Analyzed", df['competitor'].nunique())
+        # Revenue comparison
+        revenue_data = df[df['revenue_cr'].notna()].groupby('competitor')['revenue_cr'].last().reset_index()
+        if len(revenue_data) > 0:
+            fig = px.bar(revenue_data, x='competitor', y='revenue_cr',
+                        title='Latest Revenue Comparison (₹ Cr)',
+                        color='revenue_cr',
+                        color_continuous_scale='Viridis')
+            st.plotly_chart(fig, use_container_width=True)
+    
     with col2:
-        st.metric("📁 Total Analyses", len(df))
-    with col3:
-        st.metric("🕒 Last Analysis", df['timestamp'].max().strftime('%Y-%m-%d'))
-    with col4:
-        st.metric("🎯 Benchmarked", len(df[df['benchmark'].notna()]))
+        # Client base comparison
+        client_data = df[df['client_count'].notna()].groupby('competitor')['client_count'].last().reset_index()
+        if len(client_data) > 0:
+            fig = px.bar(client_data, x='competitor', y='client_count',
+                        title='Client Base Comparison',
+                        color='client_count',
+                        color_continuous_scale='Oranges')
+            st.plotly_chart(fig, use_container_width=True)
     
-    st.divider()
+    # Trend over time for each competitor
+    st.subheader("📈 Competitor Trend Analysis")
     
-    # ===== ROW 2: Competitor Selector =====
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        selected_competitor = st.selectbox(
-            "Select Competitor",
-            options=['All'] + sorted(df['competitor'].unique().tolist())
-        )
+    # Allow selecting multiple competitors for comparison
+    selected_comps = st.multiselect(
+        "Select competitors to compare trends",
+        options=df['competitor'].unique(),
+        default=df['competitor'].unique()[:3]  # Default to first 3
+    )
     
-    # Filter data
-    if selected_competitor != 'All':
-        filtered_df = df[df['competitor'] == selected_competitor]
-    else:
-        filtered_df = df
-    
-    # ===== ROW 3: Analysis Timeline =====
-    st.subheader("📈 Analysis Timeline")
-    
-    timeline_data = filtered_df.groupby(filtered_df['timestamp'].dt.date).size().reset_index(name='count')
-    fig = px.line(timeline_data, x='timestamp', y='count', 
-                  title='Analyses Over Time',
-                  markers=True)
-    fig.update_layout(height=400)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # ===== ROW 4: Competitor Comparison =====
-    st.subheader("🏢 Competitor Comparison")
-    
-    # Prepare data for comparison
-    comparison = df.groupby('competitor').size().reset_index(name='analyses_count')
-    fig = px.bar(comparison, x='competitor', y='analyses_count',
-                 title='Number of Analyses by Competitor',
-                 color='analyses_count',
-                 color_continuous_scale='Blues')
-    fig.update_layout(height=400)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # ===== ROW 5: Detailed View =====
-    st.subheader("📄 Detailed Analysis")
-    
-    # Let user select which analysis to view
-    analysis_options = filtered_df.apply(
-        lambda x: f"{x['competitor']} - {x['timestamp'].strftime('%Y-%m-%d %H:%M')}", 
-        axis=1
-    ).tolist()
-    
-    if analysis_options:
-        selected = st.selectbox("Select analysis to view", analysis_options)
-        selected_row = filtered_df.iloc[analysis_options.index(selected)]
+    if selected_comps:
+        trend_data = df[df['competitor'].isin(selected_comps)]
+        trend_data = trend_data.sort_values('analysis_date')
         
-        # Display in tabs
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "💰 Financials", "📊 Revenue Model", "🎯 Strategy", 
-            "🔍 Benchmark", "💡 Recommendations"
-        ])
-        
-        with tab1:
-            st.markdown(selected_row['financial_highlights'])
-        with tab2:
-            st.markdown(selected_row['revenue_model'])
-        with tab3:
-            st.markdown(selected_row['strategic_priorities'])
-        with tab4:
-            st.markdown(selected_row['benchmark'])
-        with tab5:
-            st.markdown(selected_row['recommendations'])
-
-else:
-    st.info("👈 Upload your first competitor analysis CSV using the sidebar to get started!")
-    
-    # Show how to use
-    with st.expander("📖 How to use this dashboard"):
-        st.markdown("""
-        1. Run the competitor analysis in Google Colab
-        2. Download the CSV file generated
-        3. Upload it here using the sidebar on the left
-        4. View and compare multiple competitors over time
-        """)
+        fig = px.line(trend_data, x='analysis_date', y='revenue_cr',
+                     color='competitor', title='Revenue Trends Over Time',
+                     markers=True)
+        st.plotly_chart(fig, use_container_width=True)
